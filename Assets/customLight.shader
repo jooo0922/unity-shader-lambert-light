@@ -38,7 +38,7 @@ Shader "Custom/customLight"
             o.Albedo = c.rgb;
 
             // UnpackNormal() 함수는 변환된 노말맵 텍스쳐 형식인 DXTnm 에서 샘플링해온 텍셀값 float4를 인자로 받아 float3 를 리턴해줌.
-            // 이렇게 o.Normal 구조체 속성에 넣어준 노말값은 커스텀 라이팅 함수의 SurfaceOutput 인자를 통해서 꺼내쓸 수 있음.
+            // 이렇게 o.Normal 구조체 속성에 넣어준 노말값은 커스텀 라이팅 함수의 SurfaceOutput 으로 꺼내쓸 수 있음.
             o.Normal = UnpackNormal(tex2D(_BumpMap, IN.uv_BumpMap)); 
             o.Alpha = c.a;
         }
@@ -91,9 +91,30 @@ Shader "Custom/customLight"
 
                 각 함수에 대한 자세한 설명은 p.304 참고.
             */
-            float ndotl = saturate(dot(s.Normal, lightDir));
+            // float ndotl = saturate(dot(s.Normal, lightDir));
 
-            return ndotl; // +0.5 해보면 최솟값이 0.5가 됨에 따라 검은색이 아예 안보일거임. 즉, 최솟값이 0으로 모두 잘 초기화되었다는 뜻
+            /*
+                램버트 연산은 벡터를 내적하여 얻은 cos 값으로
+                조명값을 계산하기 때문에, 그 특성상 음영 대비가 극심함.
+
+                그래서 이런 음영 변화를 부드럽게 처리하기 위해,
+                물리적으로 옳은 것은 아니지만,
+                내적결과값에 '* 0.5 + 0.5' 를 해줌으로써,
+                값의 범위를 0 ~ 1 사이로 Mapping 해줌.
+
+                이 공식은 밸브 사 논문으로 발표된 '하프-램버트 공식' 이라고 함.
+
+                근데 이게 뭐 전혀 새로운 공식이 아닌게
+                카메라 NDC 좌표계를 2D 좌표계로 변환할 때에도
+                이런 공식을 썼는데, 이걸 그냥 조명 계산에 응용한 것일 뿐임.
+
+                이걸 사용하면 음영처리가 훨씬 부드럽게 되어서
+                미적으로 더 보기 좋아짐.
+            */
+            float ndotl = dot(s.Normal, lightDir) * 0.5 + 0.5;
+
+            // return ndotl; // +0.5 해보면 최솟값이 0.5가 됨에 따라 검은색이 아예 안보일거임. 즉, 최솟값이 0으로 모두 잘 초기화되었다는 뜻
+            return pow(ndotl, 3); // 하프-램버트가 적용된 음영은 너무 부드러워서 비현실적임. 그래서 실무에서 쓸 때에는 이 정도를 좀 줄이고자 매핑된 내적값을 3제곱 해주기도 함.
         }
 
         ENDCG
