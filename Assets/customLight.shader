@@ -3,6 +3,7 @@ Shader "Custom/customLight"
     Properties
     {
         _MainTex ("Albedo (RGB)", 2D) = "white" {} // 텍스트 1개만 받는 기본 쉐이더로 설정함.
+        _BumpMap ("NormalMap", 2D) = "bump" {} // 유니티는 인터페이스로부터 입력받는 변수명을 '_BumpMap' 이라고 지으면, 텍스쳐 인터페이스는 노말맵을 넣을 것이라고 인지함.
     }
     SubShader
     {
@@ -22,10 +23,12 @@ Shader "Custom/customLight"
         #pragma surface surf Test noambient
 
         sampler2D _MainTex;
+        sampler2D _BumpMap;
 
         struct Input
         {
             float2 uv_MainTex;
+            float2 uv_BumpMap;
         };
 
         void surf (Input IN, inout SurfaceOutput o)
@@ -33,6 +36,10 @@ Shader "Custom/customLight"
             // Albedo comes from a texture tinted by color
             fixed4 c = tex2D (_MainTex, IN.uv_MainTex);
             o.Albedo = c.rgb;
+
+            // UnpackNormal() 함수는 변환된 노말맵 텍스쳐 형식인 DXTnm 에서 샘플링해온 텍셀값 float4를 인자로 받아 float3 를 리턴해줌.
+            // 이렇게 o.Normal 구조체 속성에 넣어준 노말값은 커스텀 라이팅 함수의 SurfaceOutput 인자를 통해서 꺼내쓸 수 있음.
+            o.Normal = UnpackNormal(tex2D(_BumpMap, IN.uv_BumpMap)); 
             o.Alpha = c.a;
         }
 
@@ -56,7 +63,37 @@ Shader "Custom/customLight"
             반드시 저렇게 함수이름을 작성해줄 것!
         */
         float4 LightingTest(SurfaceOutput s, float3 lightDir, float atten) {
-            return float4(1, 0, 0, 1);
+            /*
+                각 버텍스의 노멀벡터
+                (surf 에서 o.Normal 에 아무값도 안넣어줬더라도, 해당 모델의 버텍스에 기본적으로 노말값이 평범하게 들어가 있는 상태)
+                와 조명벡터 (음수화해서 거꾸로 뒤집은 거) 를 내적해주면
+                두 벡터의 각도에 따른 cos 값이 나옴. 
+                
+                이거를 float 하나짜리 변수로 받은 다음,
+                바로 리턴해줘버리면 됨.
+
+                float4 를 리턴하지 않았더라도,
+                한 자리수 float 을 리턴해버리면
+                알아서 셰이더가 float4(ndotl, ndotl, ndotl, ndotl) 로 
+                변환해서 리턴해 줌.
+            */
+            // float ndotl = dot(s.Normal, lightDir); 
+
+            /*
+                내적의 결과값은 -1 ~ 1 사이의 값을 모두 포함하기 때문에
+                각 픽셀이 색상값으로 음수값을 가지면 문제가 발생할 수 있음.
+
+                예를 들어, 다른 조명을 추가할 시 값을 더해줘도 
+                계속 음수값이어서 0과 똑같이 계속 어두운 색상으로 찍히는 경우가 있음.
+
+                이러한 문제를 해결하기 위해, saturate(), max() 등의 함수로
+                0미만의 음수값들은 다 0으로 초기화시켜주는 게 좋음.
+
+                각 함수에 대한 자세한 설명은 p.304 참고.
+            */
+            float ndotl = saturate(dot(s.Normal, lightDir));
+
+            return ndotl; // +0.5 해보면 최솟값이 0.5가 됨에 따라 검은색이 아예 안보일거임. 즉, 최솟값이 0으로 모두 잘 초기화되었다는 뜻
         }
 
         ENDCG
