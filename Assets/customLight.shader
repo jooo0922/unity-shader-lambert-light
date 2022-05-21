@@ -121,11 +121,23 @@ Shader "Custom/customLight"
         
             // 이제 atten(감쇄), Albedo, 조명 색 및 강도 등을 적용해주기 위해 saturate 함수로 음수값을 0으로 초기화한 상태에서 다시 시작함.
             // 하프 램버트로 해도 되기는 하는데, 감쇄 연산 적용시 좀 이상해져서 그냥 saturate() 함수로 음수값 조절한 상태에서 적용해주는 게 낫다고 함.
-            float ndotl = saturate(dot(s.Normal, lightDir));
+            
+            // float ndotl = saturate(dot(s.Normal, lightDir));
+            float ndotl = dot(s.Normal, lightDir) * 0.5 + 0.5; // 이번에는 완성된 Lambert 에 Half-Lambert 기법을 적용해볼거임.
             
             // Albedo 텍스쳐, 빛의 강도 및 색상(_LightColor 내장변수), 빛의 감쇄(attenuation) 를 적용하는 부분 -> 자세한 설명은 하단 comment 참고
             float4 final;
-            final.rgb = ndotl * s.Albedo * _LightColor0.rgb * atten;
+            // final.rgb = ndotl * s.Albedo * _LightColor0.rgb * atten;
+            
+            /*
+                Half-Lambert 를 적용하면,
+                atten 값에 1, 2번 효과(self shadow, receive shadow) 에 의해
+                승모근 뒷쪽 부분에 그림자가 너무 티나게 어두워보이는 문제가 있음.
+
+                이럴 경우 아래의 두 가지 방법 중 하나로 해결해주면 됨.
+            */
+            // final.rgb = ndotl * s.Albedo * _LightColor0.rgb; // 1. 아예 단순무식하게 atten 값을 없애버린다.
+            final.rgb = pow(ndotl, 3) * s.Albedo * _LightColor0.rgb * atten; // 2. Half-Lambert 로 계산한 ndotl 내적값을 pow() 함수로 세 제곱 정도 해줘서 전반적으로 음영을 더 어둡게 깔아준다. (p.312 참고) -> 이러면 atten 에 의해 드리우는 그림자가 묻혀서 더 자연스러워 보임. 
             final.a = s.Alpha;
             
             return final;
