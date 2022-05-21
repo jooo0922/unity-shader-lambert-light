@@ -20,7 +20,10 @@ Shader "Custom/customLight"
              무조건 여기에서 지정한 이름을 사용해야 
              유니티가 커스텀 라이트 함수로 인식함!
         */
-        #pragma surface surf Test noambient
+        #pragma surface surf Test // noambient
+        // noambient 키워드는 환경광을 제거해서 순수한 색상을 확인할 때에만 넣어줌. 
+        // 셰이더 코딩을 끝내고 나면, 다시 noambient 를 제거해서 환경광을 더해줘야 
+        // 더 자연스러운 렌더링 결과를 볼 수 있음.
 
         sampler2D _MainTex;
         sampler2D _BumpMap;
@@ -39,7 +42,7 @@ Shader "Custom/customLight"
 
             // UnpackNormal() 함수는 변환된 노말맵 텍스쳐 형식인 DXTnm 에서 샘플링해온 텍셀값 float4를 인자로 받아 float3 를 리턴해줌.
             // 이렇게 o.Normal 구조체 속성에 넣어준 노말값은 커스텀 라이팅 함수의 SurfaceOutput 으로 꺼내쓸 수 있음.
-            o.Normal = UnpackNormal(tex2D(_BumpMap, IN.uv_BumpMap)); 
+            // o.Normal = UnpackNormal(tex2D(_BumpMap, IN.uv_BumpMap)); 
             o.Alpha = c.a;
         }
 
@@ -111,10 +114,21 @@ Shader "Custom/customLight"
                 이걸 사용하면 음영처리가 훨씬 부드럽게 되어서
                 미적으로 더 보기 좋아짐.
             */
-            float ndotl = dot(s.Normal, lightDir) * 0.5 + 0.5;
+            // float ndotl = dot(s.Normal, lightDir) * 0.5 + 0.5;
 
             // return ndotl; // +0.5 해보면 최솟값이 0.5가 됨에 따라 검은색이 아예 안보일거임. 즉, 최솟값이 0으로 모두 잘 초기화되었다는 뜻
-            return pow(ndotl, 3); // 하프-램버트가 적용된 음영은 너무 부드러워서 비현실적임. 그래서 실무에서 쓸 때에는 이 정도를 좀 줄이고자 매핑된 내적값을 3제곱 해주기도 함
+            // return pow(ndotl, 3); // 하프-램버트가 적용된 음영은 너무 부드러워서 비현실적임. 그래서 실무에서 쓸 때에는 이 정도를 좀 줄이고자 매핑된 내적값을 3제곱 해주기도 함
+        
+            // 이제 atten(감쇄), Albedo, 조명 색 및 강도 등을 적용해주기 위해 saturate 함수로 음수값을 0으로 초기화한 상태에서 다시 시작함.
+            // 하프 램버트로 해도 되기는 하는데, 감쇄 연산 적용시 좀 이상해져서 그냥 saturate() 함수로 음수값 조절한 상태에서 적용해주는 게 낫다고 함.
+            float ndotl = saturate(dot(s.Normal, lightDir));
+            
+            // Albedo 텍스쳐, 빛의 강도 및 색상(_LightColor 내장변수), 빛의 감쇄(attenuation) 를 적용하는 부분 -> 자세한 설명은 하단 comment 참고
+            float4 final;
+            final.rgb = ndotl * s.Albedo * _LightColor0.rgb * atten;
+            final.a = s.Alpha;
+            
+            return final;
         }
 
         ENDCG
@@ -160,4 +174,51 @@ Shader "Custom/customLight"
     그림자나 거리가 멀어지면서
     빛이 점점 어두워지는 감쇠현상을
     구현하기 위해 받는 값
+*/
+
+/*
+    빛의 감쇄, 색상 및 강도, Albedo 적용 
+
+    final.rgb = ndotl * s.Albedo * _LightColor0.rgb * atten;
+
+    위의 공식은 완전한 Lambert Lighting 을 구현하기 위해, 
+    빛의 감쇄, 색상 및 강도, Albedo 를 적용하려는 것임. 그래서
+    각각의 값이 들어있는 변수를 ndotl(내적결과값) 에 곱해준 것임.
+
+    
+    1. s.Albedo
+
+    void surf() 함수에서 할당해준 
+    구조체의 Albedo 텍스쳐의 색상값을
+    가져다 쓰고 있는 거라고 보면 됨.
+
+    얘를 노말텍스쳐의 노말값으로 내적해준 값에
+    곱해줘야, 노말과 색상이 동시에 적용된,
+    즉, 노말 텍스쳐와 Albedo 텍스쳐가 동시에 적용된 색상 결과값이 나오게 됨.
+
+
+    2. _LightColor().rgb
+
+    얘는 유니티의 내장변수로, 조명의 색상과 강도값을 가지고 있음.
+    이 값을 곱해주면 원래의 색상에서 좀 더 누리끼리한 때깔로 바뀜.
+    -> 조명의 색상과 강도값이 적용된 것.
+
+
+    3. atten
+
+    빛의 감쇄현상을 적용시킴.
+
+    atten 은 3가지 효과를 적용하는데,
+        3-1. self shadow 를 적용시킴. (자기 자신의 그림자를 자기가 받는 것)
+        3-2. receive shadow 를 적용시킴. (다른 물체의 그림자를 자기가 받는 것)
+        3-3. Point Light 에서 조명의 감쇄현상을 적용시킴. (현재 프로젝트는 Directional Light 을 사용하고 있어서 atten 값을 곱해줘도 잘 티가 안남.)
+
+    self shadow 및 receive shadow 가 적용된 부분을 보려면, 
+    승모근(?) 목 뒷쪽 부분에 그림자를 주고 있음.
+
+    내적값에 의해 조명벡터를 계산하는 ndotl 을 지워주면,
+    조명벡터값의 영향을 아예 없앨 수 있는데,
+    이 상태에서 atten 을 없앤거랑 적용한거랑 비교해보면
+
+    목 뒷쪽 부분에 그림자가 없어졌다가 생겼다가 하는 걸 볼 수 있음.
 */
